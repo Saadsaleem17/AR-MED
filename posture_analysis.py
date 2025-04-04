@@ -20,6 +20,7 @@ import uuid
 from PIL import Image as PILImage
 import tempfile
 import logging
+import sys
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -228,9 +229,15 @@ def analyze_posture(image_path, visualization=False, min_detection_confidence=0.
         image = cv2.imread(image_path)
         
         if image is None:
-            logger.error(f"Could not load image from {image_path}")
-            return "Error: Could not load image." if not return_data else {"error": "Could not load image."}
+            error_msg = f"Could not load image from {image_path}"
+            logger.error(error_msg)
+            if not generate_pdf and not return_data:
+                print(json.dumps({"error": error_msg}))
+                return
+            return {"error": error_msg}
         
+        # Convert image to RGB for MediaPipe
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         image_height, image_width, _ = image.shape
         
         # Initialize the report string and data dictionary for PDF
@@ -243,13 +250,15 @@ def analyze_posture(image_path, visualization=False, min_detection_confidence=0.
         }
         
         # Process the image to detect pose landmarks
-        # Use the global pose_detector instead of creating a new one
-        rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        results = pose_detector.process(rgb_image)
+        results = pose_detector.process(image_rgb)
             
         if not results.pose_landmarks:
-            logger.warning(f"No pose landmarks detected in {image_path}")
-            return "Error: No pose landmarks detected in the image." if not return_data else {"error": "No pose landmarks detected in the image."}
+            error_msg = f"No pose landmarks detected in {image_path}"
+            logger.warning(error_msg)
+            if not generate_pdf and not return_data:
+                print(json.dumps({"error": error_msg}))
+                return
+            return {"error": error_msg}
         
         landmarks = results.pose_landmarks.landmark
         visualization_path = None
@@ -540,21 +549,22 @@ def analyze_posture(image_path, visualization=False, min_detection_confidence=0.
             visualization_filename = f"visualization_{uuid.uuid4()}.jpg"
             visualization_path = os.path.join(visualization_dir, visualization_filename)
             cv2.imwrite(visualization_path, vis_image)
-            report += f"\nVisualization saved as {visualization_path}\n"
             
-            # Add visualization path to data if returning data
-            if return_data:
-                analysis_data["visualization_path"] = visualization_path
+            # Add visualization path to data
+            analysis_data["visualization_path"] = visualization_path
         
+        # If not generating PDF and not returning data, print JSON
+        if not generate_pdf and not return_data:
+            print(json.dumps(analysis_data, indent=2))
+            return
+
         # Generate PDF if requested
         if generate_pdf:
             pdf_path = create_pdf_report(image_path, analysis_data, visualization_path)
+            analysis_data["pdf_path"] = pdf_path
             
-            # If returning data, include the PDF path in the data
             if return_data:
-                analysis_data["pdf_path"] = pdf_path
                 return analysis_data
-            
             return f"Detailed analysis completed. PDF report generated at: {pdf_path}"
         
         # Return data if requested
@@ -565,8 +575,12 @@ def analyze_posture(image_path, visualization=False, min_detection_confidence=0.
         return report
 
     except Exception as e:
-        logger.exception(f"Error in analyze_posture: {str(e)}")
-        return {"error": f"Analysis failed: {str(e)}"}
+        error_msg = f"Analysis failed: {str(e)}"
+        logger.exception(error_msg)
+        if not generate_pdf and not return_data:
+            print(json.dumps({"error": error_msg}, indent=2))
+            return
+        return {"error": error_msg}
 
 def create_aggregated_report(analysis_results, report_path, visualization_path=None, frame_paths=None):
     """
@@ -910,8 +924,25 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
-    # Run the analysis
-    report = analyze_posture(args.image_path, args.visualize, args.confidence, not args.no_pdf)
+    # Ensure the image path exists
+    if not os.path.exists(args.image_path):
+        print(json.dumps({"error": f"Image file not found: {args.image_path}"}))
+        sys.exit(1)
     
-    # Print the report path or text report
-    print(report)
+    try:
+        # Run the analysis with appropriate flags
+        result = analyze_posture(
+            args.image_path,
+            visualization=args.visualize,
+            min_detection_confidence=args.confidence,
+            generate_pdf=not args.no_pdf,
+            return_data=False
+        )
+        
+        # If no-pdf is True, the function will print JSON directly
+        # If no-pdf is False, we'll get a string result
+        if not args.no_pdf and isinstance(result, str):
+            print(result)
+    except Exception as e:
+        print(json.dumps({"error": f"Analysis failed: {str(e)}"}))
+        sys.exit(1)
