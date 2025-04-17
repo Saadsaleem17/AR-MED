@@ -102,7 +102,8 @@ The React application will start running on http://localhost:3000
 AR-MED is a preliminary analysis tool only. The posture analysis provided is intended for informational and educational purposes only and is not meant to be a substitute for professional medical advice, diagnosis, or treatment.
 
 For an accurate diagnosis of posture-related issues or any medical condition, always consult with a qualified healthcare provider such as a physician, physical therapist, or chiropractor.
-
+##
+Try the deployed project at http://t.me/arrmed_bot
 ## License
 
 MIT 
